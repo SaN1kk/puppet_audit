@@ -2,6 +2,7 @@
 """Export one PuppetDB node to a single CSV row."""
 
 import argparse
+import base64
 import csv
 import json
 import os
@@ -9,9 +10,7 @@ import shlex
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import (
-    HTTPBasicAuthHandler, HTTPPasswordMgrWithDefaultRealm, Request, build_opener,
-)
+from urllib.request import Request, urlopen
 
 
 # CSV column -> path in the structured facts.
@@ -70,10 +69,12 @@ def load_config():
     user, password = os.getenv("PUPPET_USER"), os.getenv("PUPPET_PASSWORD")
     if (user is None) != (password is None):
         raise ValueError("Set both PUPPET_USER and PUPPET_PASSWORD, or neither")
-    passwords = HTTPPasswordMgrWithDefaultRealm()
+    auth = None
     if user is not None:
-        passwords.add_password(None, url, user, password)
-    return url, build_opener(HTTPBasicAuthHandler(passwords))
+        # Send Basic Auth immediately, matching curl -u.
+        credentials = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+        auth = f"Basic {credentials}"
+    return url, auth
 
 
 def get(data, path):
@@ -90,14 +91,17 @@ def cell(value):
     return "" if value is None else value
 
 
-def pql(client, url, query):
+def pql(auth, url, query):
     separator = "&" if "?" in url else "?"
     request = Request(
         url + separator + urlencode({"query": query}),
         headers={"Accept": "application/json"},
+        method="GET",
     )
+    if auth is not None:
+        request.add_unredirected_header("Authorization", auth)
     try:
-        with client.open(request, timeout=30) as response:
+        with urlopen(request, timeout=30) as response:
             data = json.load(response)
     except HTTPError as error:
         with error:
@@ -111,9 +115,12 @@ def pql(client, url, query):
     return data
 
 
-def collect(client, url, host):
+def collect(auth, url, host):
     host_pql = json.dumps(host, ensure_ascii=False)
-    inventory = pql(client, url, f"inventory {{ certname = {host_pql} }}")
+    inventory = pql(
+        auth, url,
+        f"inventory[certname, environment, timestamp, facts] {{ certname = {host_pql} }}",
+    )
     if not inventory:
         raise ValueError(f"No active node with facts found: {host}")
 
@@ -123,7 +130,7 @@ def collect(client, url, host):
     if not isinstance(node.get("facts"), dict):
         raise ValueError("API response has no structured facts; check PUPPET_API")
     resources = pql(
-        client, url,
+        auth, url,
         f'resources[title, parameters] {{ certname = {host_pql} '
         f'and type = "Service" }}',
     )
@@ -144,8 +151,8 @@ def main():
     parser.add_argument("-o", "--output", default="host.csv")
     args = parser.parse_args()
     try:
-        url, client = load_config()
-        row = collect(client, url, args.host)
+        url, auth = load_config()
+        row = collect(auth, url, args.host)
         with open(args.output, "w", newline="", encoding="utf-8-sig") as file:
             writer = csv.DictWriter(file, fieldnames=row)
             writer.writeheader()

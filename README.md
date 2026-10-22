@@ -1,10 +1,8 @@
 # Выгрузка PuppetDB в CSV
 
-Скрипты выгружают характеристики серверов и параметры служб из PuppetDB через nginx.
-`PUPPET_API` — точный адрес API PuppetDB: обычно `/pdb/query/v4`,
-либо настроенный в nginx маршрут к нему, например `/api`.
-Скрипты используют GET с PQL в параметре `query`.
-Маршрут должен передавать этот параметр в корневой query endpoint PuppetDB.
+Скрипты выгружают характеристики серверов и параметры служб из API PuppetDB.
+Используется проверенная схема: GET на `/pdb/query/v4`, PQL в параметре `query`
+и Basic Auth, как в `curl -G -u username --data-urlencode 'query=...'`.
 
 ## Настройка
 
@@ -14,15 +12,27 @@
 Заполните `.env` рядом со скриптами. Если файла нет, скопируйте `.env.example`:
 
 ```dotenv
-PUPPET_API=https://puppetboard.example.ru/pdb/query/v4
+PUPPET_API=https://puppetdb-api.dh.xx.xx/pdb/query/v4
 # Для Basic Auth раскомментируйте обе строки:
 # PUPPET_USER=username
 # PUPPET_PASSWORD="password"
 ```
 
 Переменные окружения имеют приоритет над `.env`. Файл `.env` исключён из Git.
+Для Basic Auth заполните обе переменные: `PUPPET_USER` и `PUPPET_PASSWORD`.
 Поддерживаются строки `KEY=value`, комментарии с `#` и значения в одинарных или двойных кавычках.
 Пароли с пробелами или `#` заключайте в кавычки. Подстановка `${VAR}` не выполняется.
+
+Проверка доступа с теми же адресом и логином (пароль curl запросит отдельно):
+
+```bash
+curl -i -G -u username \
+  --data-urlencode 'query=inventory[facts.dmi] { certname = "vm-test.9.dh.xx.xx" }' \
+  'https://puppetdb-api.dh.xx.xx/pdb/query/v4'
+```
+
+Ожидаемый ответ — HTTP 200 и JSON-массив. Скрипт запрашивает все facts,
+необходимые для CSV, и отдельно ресурсы Service.
 
 ## Один хост
 

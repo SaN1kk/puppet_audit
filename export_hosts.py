@@ -31,7 +31,7 @@ def main():
     columns.append("error")
     failed = 0
     try:
-        url, client = load_config()
+        url, auth = load_config()
         hosts = read_hosts(args.hosts_file)
         if not hosts:
             parser.error("Host list is empty")
@@ -40,7 +40,7 @@ def main():
             writer.writeheader()
             for host in hosts:
                 try:
-                    row = collect(client, url, host)
+                    row = collect(auth, url, host)
                 except (OSError, ValueError) as error:
                     failed += 1
                     row = {"certname": host, "error": str(error)}
