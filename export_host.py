@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import (
     HTTPBasicAuthHandler, HTTPPasswordMgrWithDefaultRealm, Request, build_opener,
 )
@@ -62,7 +63,7 @@ def load_config():
                 raise ValueError(f".env:{number}: enclose values containing spaces in quotes")
             os.environ.setdefault(key.strip(), parts[0] if parts else "")
 
-    url = os.getenv("PUPPET_API", "").rstrip("/")
+    url = os.getenv("PUPPET_API", "")
     if not url:
         raise ValueError("Set PUPPET_API in .env or environment variables")
     user, password = os.getenv("PUPPET_USER"), os.getenv("PUPPET_PASSWORD")
@@ -94,8 +95,16 @@ def pql(client, url, query):
         data=json.dumps({"query": query}, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
-    with client.open(request, timeout=30) as response:
-        data = json.load(response)
+    try:
+        with client.open(request, timeout=30) as response:
+            data = json.load(response)
+    except HTTPError as error:
+        with error:
+            detail = " ".join(error.read(2000).decode("utf-8", errors="replace").split())
+        raise ValueError(
+            f"HTTP {error.code} {error.reason}; URL: {error.url}; "
+            f"query: {query}; response: {detail or '(empty)'}"
+        ) from None
     if not isinstance(data, list):
         raise ValueError("API response must be a JSON array; check PUPPET_API")
     return data

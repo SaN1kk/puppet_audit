@@ -1,7 +1,9 @@
 # Выгрузка PuppetDB в CSV
 
 Скрипты выгружают характеристики серверов и параметры служб из PuppetDB через nginx.
-Адрес `PUPPET_API` должен вести на API PuppetDB `/pdb/query/v4`.
+`PUPPET_API` — точный адрес API PuppetDB: обычно `/pdb/query/v4`,
+либо настроенный в nginx маршрут к нему, например `/api`.
+Маршрут должен принимать POST с JSON вида `{"query": "inventory { ... }"}`.
 
 ## Настройка
 
