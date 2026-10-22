@@ -8,6 +8,7 @@ import os
 import shlex
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import (
     HTTPBasicAuthHandler, HTTPPasswordMgrWithDefaultRealm, Request, build_opener,
 )
@@ -90,10 +91,10 @@ def cell(value):
 
 
 def pql(client, url, query):
+    separator = "&" if "?" in url else "?"
     request = Request(
-        url,
-        data=json.dumps({"query": query}, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        url + separator + urlencode({"query": query}),
+        headers={"Accept": "application/json"},
     )
     try:
         with client.open(request, timeout=30) as response:
@@ -111,15 +112,19 @@ def pql(client, url, query):
 
 
 def collect(client, url, host):
-    host = json.dumps(host, ensure_ascii=False)
-    inventory = pql(client, url, f"inventory {{ certname = {host} }}")
+    host_pql = json.dumps(host, ensure_ascii=False)
+    inventory = pql(client, url, f"inventory {{ certname = {host_pql} }}")
     if not inventory:
         raise ValueError(f"No active node with facts found: {host}")
 
     node = inventory[0]
+    if len(inventory) != 1 or not isinstance(node, dict) or node.get("certname") != host:
+        raise ValueError("API did not return the requested certname; check PUPPET_API")
+    if not isinstance(node.get("facts"), dict):
+        raise ValueError("API response has no structured facts; check PUPPET_API")
     resources = pql(
         client, url,
-        f'resources[title, parameters] {{ certname = {host} '
+        f'resources[title, parameters] {{ certname = {host_pql} '
         f'and type = "Service" }}',
     )
     services = {item["title"]: item.get("parameters") for item in resources}
