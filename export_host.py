@@ -5,10 +5,11 @@ import argparse
 import csv
 import json
 import os
+import shlex
 from pathlib import Path
-
-import requests
-from dotenv import load_dotenv
+from urllib.request import (
+    HTTPBasicAuthHandler, HTTPPasswordMgrWithDefaultRealm, Request, build_opener,
+)
 
 
 # CSV column -> path in the structured facts.
@@ -46,6 +47,33 @@ FACTS = {
 SERVICES = ("kesl", "telegraf", "zabbix-agent", "zabbix-agent2", "auditd")
 
 
+def load_config():
+    """Read simple KEY=value settings; existing environment variables take priority."""
+    path = Path(__file__).with_name(".env")
+    if path.exists():
+        for number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            key, separator, value = line.partition("=")
+            if not separator or not key.strip().isidentifier():
+                raise ValueError(f".env:{number}: expected KEY=value")
+            parts = shlex.split(value, comments=True)
+            if len(parts) > 1:
+                raise ValueError(f".env:{number}: enclose values containing spaces in quotes")
+            os.environ.setdefault(key.strip(), parts[0] if parts else "")
+
+    url = os.getenv("PUPPET_API", "").rstrip("/")
+    if not url:
+        raise ValueError("Set PUPPET_API in .env or environment variables")
+    user, password = os.getenv("PUPPET_USER"), os.getenv("PUPPET_PASSWORD")
+    if (user is None) != (password is None):
+        raise ValueError("Set both PUPPET_USER and PUPPET_PASSWORD, or neither")
+    passwords = HTTPPasswordMgrWithDefaultRealm()
+    if user is not None:
+        passwords.add_password(None, url, user, password)
+    return url, build_opener(HTTPBasicAuthHandler(passwords))
+
+
 def get(data, path):
     for key in path.split("."):
         if not isinstance(data, dict):
@@ -60,24 +88,28 @@ def cell(value):
     return "" if value is None else value
 
 
-def pql(session, url, query):
-    response = session.post(url, json={"query": query}, timeout=(10, 30))
-    response.raise_for_status()
-    data = response.json()
+def pql(client, url, query):
+    request = Request(
+        url,
+        data=json.dumps({"query": query}, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    with client.open(request, timeout=30) as response:
+        data = json.load(response)
     if not isinstance(data, list):
         raise ValueError("API response must be a JSON array; check PUPPET_API")
     return data
 
 
-def collect(session, url, host):
+def collect(client, url, host):
     host = json.dumps(host, ensure_ascii=False)
-    inventory = pql(session, url, f"inventory {{ certname = {host} }}")
+    inventory = pql(client, url, f"inventory {{ certname = {host} }}")
     if not inventory:
         raise ValueError(f"No active node with facts found: {host}")
 
     node = inventory[0]
     resources = pql(
-        session, url,
+        client, url,
         f'resources[title, parameters] {{ certname = {host} '
         f'and type = "Service" }}',
     )
@@ -97,24 +129,14 @@ def main():
     parser.add_argument("host", help="Exact Puppet certname")
     parser.add_argument("-o", "--output", default="host.csv")
     args = parser.parse_args()
-    load_dotenv(Path(__file__).with_name(".env"), encoding="utf-8-sig")
-    url = os.getenv("PUPPET_API")
-    if not url:
-        parser.error("Set PUPPET_API in .env or environment variables")
-    user, password = os.getenv("PUPPET_USER"), os.getenv("PUPPET_PASSWORD")
-    if (user is None) != (password is None):
-        parser.error("Set both PUPPET_USER and PUPPET_PASSWORD, or neither")
-
     try:
-        with requests.Session() as session:
-            if user is not None:
-                session.auth = (user, password)
-            row = collect(session, url.rstrip("/"), args.host)
+        url, client = load_config()
+        row = collect(client, url, args.host)
         with open(args.output, "w", newline="", encoding="utf-8-sig") as file:
             writer = csv.DictWriter(file, fieldnames=row)
             writer.writeheader()
             writer.writerow(row)
-    except (requests.RequestException, ValueError, OSError) as error:
+    except (ValueError, OSError) as error:
         parser.exit(1, f"Error: {error}\n")
     print(f"Saved: {args.output}")
 

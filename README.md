@@ -5,12 +5,8 @@
 
 ## Настройка
 
-Установите Python 3.9+ и зависимости. Команды ниже — для PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
+Достаточно Python 3.7+ с поддержкой HTTPS и доступа к API.
+Устанавливать пакеты не нужно: `pip`, `sudo` и интернет для установки не требуются.
 
 Заполните `.env` рядом со скриптами. Если файла нет, скопируйте `.env.example`:
 
@@ -22,11 +18,13 @@ PUPPET_API=https://puppetboard.example.ru/pdb/query/v4
 ```
 
 Переменные окружения имеют приоритет над `.env`. Файл `.env` исключён из Git.
+Поддерживаются строки `KEY=value`, комментарии с `#` и значения в одинарных или двойных кавычках.
+Пароли с пробелами или `#` заключайте в кавычки. Подстановка `${VAR}` не выполняется.
 
 ## Один хост
 
-```powershell
-.\.venv\Scripts\python.exe export_host.py vm-test-1 -o host.csv
+```bash
+python3 export_host.py vm-test-1 -o host.csv
 ```
 
 ## Группа хостов
@@ -39,13 +37,14 @@ vm-test-2
 vm-test-3
 ```
 
-```powershell
-.\.venv\Scripts\python.exe export_hosts.py hosts.txt -o summary.csv
+```bash
+python3 export_hosts.py hosts.txt -o summary.csv
 ```
 
 Один хост — одна строка CSV. Пустые строки, комментарии с `#` и повторы пропускаются.
 Ошибки записываются в колонку `error`, остальные хосты продолжают обрабатываться.
 При наличии ошибок код завершения — `1`. Оба скрипта должны находиться рядом.
+На Windows вместо `python3` используйте `python`.
 
 CSV сохраняется в UTF-8 с BOM; словари и списки записываются как JSON.
 Facts отражают последний сбор данных (`facts_timestamp`), а параметры служб — желаемую конфигурацию Puppet.
